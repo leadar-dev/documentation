@@ -1,0 +1,128 @@
+# docstrings conventions — js
+
+соглашения по документированию кода для vanilla js frontend leadar.
+используем JSDoc. язык — английский.
+
+---
+
+## когда писать
+
+| что | JSDoc |
+|---|---|
+| экспортируемая функция | ✅ обязательно |
+| экспортируемый класс | ✅ обязательно |
+| публичный метод класса | ✅ обязательно |
+| приватный метод (`#foo`) | 🟡 если логика неочевидна |
+| однострочная очевидная функция | ❌ не нужен |
+| тесты | ❌ не нужен |
+
+---
+
+## формат
+
+первая строка — краткое описание без точки если одна строка.
+затем `@param`, `@returns`, `@throws` если есть.
+
+```js
+/**
+ * Fetch paginated list of wants from backend API.
+ * @param {import('../types.js').Filters} filters
+ * @returns {Promise<import('../types.js').WantsResponse>}
+ * @throws {ApiError} on non-2xx response
+ * @throws {NetworkError} if server is unreachable
+ */
+export async function fetchWants(filters) { ... }
+```
+
+---
+
+## однострочный JSDoc
+
+если функция простая и тип возврата очевиден:
+
+```js
+/** Format price as Russian locale string. */
+export function formatPrice(/** @type {number} */ price) {
+    return price.toLocaleString("ru-RU") + " ₽"
+}
+```
+
+---
+
+## классы
+
+```js
+/**
+ * Reactive store for want listings.
+ * Fetches data from backend and notifies subscribers on state changes.
+ */
+export class WantStore extends BaseStore {
+    constructor() {
+        super()
+        /** @type {import('../types.js').Want[]} */
+        this.wants = []
+
+        /** @type {boolean} */
+        this.loading = false
+
+        /** @type {string|null} currently displayed error message */
+        this.error = null
+    }
+
+    /**
+     * Update filters and reload from page 1.
+     * @param {Partial<import('../types.js').Filters>} patch
+     * @returns {Promise<void>}
+     */
+    async setFilters(patch) { ... }
+}
+```
+
+---
+
+## @throws — для функций которые бросают
+
+```js
+/**
+ * Parse stateData from kwork SSR HTML.
+ * @param {string} html
+ * @returns {Object}
+ * @throws {Error} if stateData marker is not found in HTML
+ */
+export function parseStateData(html) { ... }
+```
+
+---
+
+## что не писать
+
+```js
+// ❌ пересказ имени функции
+/**
+ * Gets the id.
+ * @returns {number} the id
+ */
+function getId(want) { return want.id }
+
+// ❌ JSDoc без типов
+/**
+ * @param filters
+ * @returns result
+ */
+function fetchWants(filters) { ... }
+
+// ✅ JSDoc только если добавляет информацию
+// простой геттер — документировать не нужно
+function getId(/** @type {Want} */ want) { return want.id }
+```
+
+---
+
+## `//` комментарии — только TODO
+
+обычные `//` комментарии не используем.
+исключение — только TODO по формату из `CODESTYLE_JS.md`:
+
+```js
+// TODO(qu1nqqy): add virtual scroll — perf not yet an issue
+```

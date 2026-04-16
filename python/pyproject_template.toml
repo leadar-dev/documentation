@@ -1,0 +1,67 @@
+[project]
+name = "parser-kwork"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+fix = true
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ANN",    # flake8-annotations (типизация)
+    "RET",    # flake8-return
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "PTH",    # flake8-pathlib
+    "ERA",    # eradicate (закомментированный код)
+    "RUF",    # ruff-specific
+    "D",      # pydocstring (google style)
+]
+ignore = [
+    "D100",   # missing docstring in public module — не обязательно
+    "D104",   # missing docstring in public package
+    "D107",   # missing docstring in __init__ — документируем в классе
+    "ANN101", # missing type annotation for self
+    "ANN102", # missing type annotation for cls
+    "ANN204", # missing return type for __init__
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "ANN",    # типизация в тестах не обязательна
+    "D",      # docstring в тестах не нужен
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+force-sort-within-sections = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.ty]
+# https://github.com/astral-sh/ty
+
+[tool.ty.rules]
+# стандартный режим — типы везде кроме тестов
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.src]
+include = ["src"]
+exclude = ["tests"]
