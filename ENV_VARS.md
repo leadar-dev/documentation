@@ -28,7 +28,6 @@ env vars  >  config.toml
 base_url = "https://kwork.ru"
 request_delay = 1.5
 user_agent = "Mozilla/5.0 ..."
-cookies = ""           # в проде — переопределяем через env
 
 [logging]
 level = "INFO"
@@ -38,6 +37,10 @@ url = "amqp://guest:guest@localhost/"   # в проде — через env
 
 [database]
 url = "postgresql+asyncpg://postgres:postgres@localhost/leadar"  # в проде — через env
+
+[dragonfly]
+url = "redis://localhost:6379"          # в проде — через env
+dedup_ttl_days = 7                      # TTL ключей дедупликации
 
 [parser]
 interval = 60
@@ -59,7 +62,7 @@ interval = 60
 # секреты — никогда не в toml
 RABBITMQ__URL=amqp://user:secret@rabbit.prod/leadar
 DATABASE__URL=postgresql+asyncpg://user:secret@db.prod/leadar
-KWORK__COOKIES=phpsessid=abc123; kwtoken=xyz
+DRAGONFLY__URL=redis://dragonfly:6379
 
 # оверрайды для прода
 LOGGING__LEVEL=WARNING
@@ -76,9 +79,10 @@ PARSER__INTERVAL=30
 |---|---|---|
 | `kwork.base_url` | ✅ дефолт | — |
 | `kwork.request_delay` | ✅ дефолт | 🟡 если надо оверрайднуть |
-| `kwork.cookies` | `""` пустая строка | ✅ в проде |
 | `rabbitmq.url` | локальный дефолт | ✅ в проде |
 | `database.url` | локальный дефолт | ✅ в проде |
+| `dragonfly.url` | локальный дефолт | ✅ в проде |
+| `dragonfly.dedup_ttl_days` | `7` | 🟡 если надо |
 | `logging.level` | `"INFO"` | 🟡 если надо |
 
 ---

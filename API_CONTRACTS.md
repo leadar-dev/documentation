@@ -75,13 +75,52 @@ queues:
 
 ### `parser.fl.want` — заказ с fl.ru
 
-схема аналогична `parser.kwork.want`, поле `source: "fl"`.  
+схема аналогична `parser.kwork.want`, поле `source: "fl"`.
 специфичные для fl поля добавляем по мере изучения API.
 
 ### `parser.upwork.want` — заказ с upwork
 
-схема аналогична, `source: "upwork"`.  
+схема аналогична, `source: "upwork"`.
 бюджет в USD — добавляем поле `currency: "USD"`.
+
+---
+
+## события backend → bot
+
+### `backend.want.new` — новый заказ прошёл дедупликацию
+
+публикуется backend-ом только при **первом** upsert want. консьюмер — `bot.notifications`.
+
+```json
+{
+  "event": "backend.want.new",
+  "version": 1,
+  "timestamp": "2026-04-17T00:00:00Z",
+  "payload": {
+    "want_id": 123,
+    "source": "kwork",
+    "name": "WordPress: настроить загрузку фото в записи",
+    "price_limit": 3000.00,
+    "possible_price_limit": 9000.00,
+    "category_id": 38,
+    "url": "https://kwork.ru/projects/3148262/view",
+    "date_create": "2026-04-17T00:00:00Z",
+    "date_expire": "2026-04-21T00:00:00Z"
+  }
+}
+```
+
+| поле | тип | описание |
+|---|---|---|
+| `want_id` | int | внутренний ID в `leadar_backend` |
+| `source` | string | площадка |
+| `name` | string | заголовок заказа |
+| `price_limit` | float | бюджет |
+| `possible_price_limit` | float | максимальный бюджет |
+| `category_id` | int | категория |
+| `url` | string | ссылка на заказ |
+| `date_create` | ISO 8601 UTC | дата публикации |
+| `date_expire` | ISO 8601 UTC | дата истечения |
 
 ---
 
@@ -142,7 +181,17 @@ class KworkWantPayload(TypedDict):
 
 ## REST API (backend)
 
-базовый URL: `http://backend:8000/api/v1`
+базовый URL:
+- prod: `https://api.leadar.qu1nqqy.ru`
+- dev: `https://api.dev.leadar.qu1nqqy.ru`
+
+версионирования нет. разделение — через сабдомен.
+
+### авторизация
+
+все эндпоинты требуют JWT. исключение — `/health`.
+
+JWT выдаётся backend-ом после Telegram Login. передаётся в httpOnly cookie — не в теле запроса и не в заголовке Authorization с фронта.
 
 ### формат ответа
 
@@ -171,9 +220,13 @@ class KworkWantPayload(TypedDict):
 
 | метод | путь | описание |
 |---|---|---|
+| `POST` | `/auth/telegram` | аутентификация через Telegram Login Widget |
+| `POST` | `/auth/logout` | инвалидация сессии |
+| `GET` | `/health` | healthcheck (без авторизации) |
+| `GET` | `/metrics` | Prometheus метрики (без авторизации, закрыт nginx в проде) |
 | `GET` | `/wants` | список заказов с фильтрами |
 | `GET` | `/wants/{id}` | один заказ |
-| `GET` | `/analytics/zscore` | z-score по категориям |
+| `GET` | `/analytics/zscore` | z-score по категориям (precomputed) |
 | `GET` | `/analytics/heatmap` | тепловая карта активности |
 | `GET` | `/categories` | список категорий |
 

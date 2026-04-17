@@ -52,34 +52,47 @@ git checkout -b update
 
 ```
 sprint-1: базовая инфраструктура
-  infrastructure: docker compose, postgres, rabbitmq, nginx
+  infrastructure: docker compose, postgres, rabbitmq, nginx, dragonfly
+  postgres: инициализация баз, пользователи
+  rabbitmq: exchanges, queues, DLQ конфиг (definitions.json)
+  nginx: сабдомены api.leadar / leadar, /metrics закрыт
+  prometheus + postgres-exporter: базовый мониторинг
+  healthcheck: для всех сервисов в compose
 
 sprint-2: парсер kwork — листинг
-  parser-kwork: SSR парсинг, извлечение wants, пагинация, публикация в rabbitmq
+  parser-kwork: SSR парсинг, извлечение wants, пагинация
+  parser-kwork: дедупликация через dragonfly, публикация в rabbitmq
 
 sprint-3: парсер kwork — детали заказа
   parser-kwork: парсинг одного заказа, нормализация полей, TypedDict модели
 
-sprint-4: backend — приём событий
-  backend: консьюмер rabbitmq, сохранение в postgres, REST endpoint /wants
+sprint-4: backend — приём событий и авторизация
+  backend: консьюмер rabbitmq, upsert wants, публикация backend.want.new
+  backend: REST endpoint /wants, /categories
+  backend: авторизация — Telegram Login Widget, JWT httpOnly cookie
+  backend: /health, /metrics (axum-prometheus)
+  backend: DLQ consumer
 
-sprint-5: парсер fl.ru
-  parser-fl: аналогично kwork
+sprint-5: аналитика — z-score
+  backend: batch-пересчёт z-score по расписанию (tokio interval)
+  backend: endpoint /analytics/zscore, /analytics/heatmap
 
-sprint-6: аналитика — z-score
-  backend: z-score по бюджету и активности, endpoint /analytics
+sprint-6: frontend — фид заказов
+  frontend: Svelte 5, листинг wants, фильтры, пагинация
+  frontend: авторизация через Telegram Login Widget
 
 sprint-7: telegram bot — базовый
-  telegram-bot: подписка на категории, получение новых заказов
+  telegram-bot: авторизация по allowed_ids, шаблон закрытого доступа
+  telegram-bot: подписка на категории, уведомления через bot.notifications
 
-sprint-8: frontend — фид заказов
-  frontend: листинг, фильтры по категории и бюджету
-
-sprint-9: heatmap и тренды
+sprint-8: heatmap и тренды
   backend + frontend: тепловая карта активности, линейные тренды
 
-sprint-10: парсер upwork
-  parser-upwork: аналогично kwork/fl
+sprint-9: парсер fl.ru (опционально)
+  parser-fl: аналогично kwork
+
+sprint-10: парсер upwork (опционально)
+  parser-upwork: требует отдельного ресёрча (anti-bot, API)
 ```
 
 ---

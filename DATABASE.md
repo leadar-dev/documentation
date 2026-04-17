@@ -9,10 +9,12 @@
 
 | сервис | база | владелец данных |
 |---|---|---|
-| `backend` | `leadar_backend` | wants, categories, аналитика |
-| `telegram-bot` | `leadar_bot` | пользователи, подписки, настройки |
+| `backend` | `leadar_backend` | users (auth), wants, categories, аналитика |
+| `telegram-bot` | `leadar_bot` | профили, подписки, история уведомлений |
 
 парсеры и frontend **не имеют своей БД** — парсеры пишут в брокер, frontend читает через REST.
+
+`leadar_bot` ссылается на пользователей по `telegram_id` — не через FK (разные базы).
 
 ---
 
@@ -60,6 +62,14 @@ erDiagram
         timestamptz calculated_at
     }
 
+    users {
+        bigserial id PK
+        bigint telegram_id UK
+        boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
     wants ||--o{ want_scores : "has"
     categories ||--o{ wants : "has"
     categories ||--o{ categories : "parent"
@@ -68,14 +78,32 @@ erDiagram
 ### индексы — leadar_backend
 
 ```sql
--- основные запросы — фильтрация по source, category, status
+-- users
+CREATE UNIQUE INDEX idx_users_telegram_id ON users(telegram_id);
+
+-- wants — точечные фильтры
 CREATE INDEX idx_wants_source ON wants(source);
 CREATE INDEX idx_wants_category_id ON wants(category_id);
 CREATE INDEX idx_wants_status ON wants(status);
 CREATE INDEX idx_wants_date_create ON wants(date_create DESC);
+CREATE INDEX idx_wants_date_expire ON wants(date_expire);
 
 -- upsert по внешнему id
 CREATE UNIQUE INDEX idx_wants_source_external ON wants(source, external_id);
+
+-- основной паттерн запроса /wants с фильтрами
+CREATE INDEX idx_wants_source_category_status ON wants(source, category_id, status);
+
+-- только активные заказы — большинство запросов фронта
+CREATE INDEX idx_wants_active ON wants(date_create DESC) WHERE status = 'active';
+
+-- categories
+CREATE UNIQUE INDEX idx_categories_source_external ON categories(source, external_id);
+CREATE INDEX idx_categories_parent_id ON categories(parent_id);
+
+-- аналитика
+CREATE INDEX idx_want_scores_want_id ON want_scores(want_id);
+CREATE INDEX idx_want_scores_calculated_at ON want_scores(calculated_at DESC);
 ```
 
 ---
@@ -120,9 +148,15 @@ erDiagram
 
 ```sql
 CREATE UNIQUE INDEX idx_users_telegram_id ON users(telegram_id);
+
 CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
-CREATE INDEX idx_subscriptions_active ON subscriptions(is_active) WHERE is_active = true;
-CREATE INDEX idx_notification_log_user_want ON notification_log(user_id, want_id);
+-- матчинг подписок при входящем backend.want.new
+CREATE INDEX idx_subscriptions_matching ON subscriptions(is_active, source, category_id)
+    WHERE is_active = true;
+
+-- защита от дублирующих уведомлений
+CREATE UNIQUE INDEX idx_notification_log_user_want ON notification_log(user_id, want_id);
+CREATE INDEX idx_notification_log_sent_at ON notification_log(sent_at DESC);
 ```
 
 ---
@@ -191,6 +225,26 @@ CREATE TRIGGER trg_wants_updated_at
     BEFORE UPDATE ON wants
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 ```
+
+---
+
+## z-score — пересчёт
+
+z-score **не считается при каждом upsert** — это дорого и математически бессмысленно для одной точки.
+
+пересчёт запускается по расписанию внутри backend как `tokio::time::interval`:
+
+```
+интервал: каждые 30 минут (ANALYTICS__ZSCORE_INTERVAL в конфиге)
+окно выборки: последние 7 дней (ANALYTICS__ZSCORE_WINDOW_DAYS)
+```
+
+алгоритм:
+1. `SELECT source, category_id, AVG(price_limit), STDDEV(price_limit) FROM wants WHERE created_at > now() - interval`
+2. для каждого want в окне: `zscore = (price_limit - avg) / stddev`
+3. `INSERT INTO want_scores ... ON CONFLICT (want_id) DO UPDATE`
+
+эндпоинт `/analytics/zscore` только читает из `want_scores` — не считает на лету.
 
 ---
 

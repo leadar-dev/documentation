@@ -3,5 +3,6 @@
   "showLineNumber": true,
   "attachmentFolderPath": "assets",
   "useMarkdownLinks": true,
-  "newFileLocation": "current"
+  "newFileLocation": "current",
+  "showUnsupportedFiles": true
 }

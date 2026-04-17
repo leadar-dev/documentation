@@ -13,7 +13,7 @@
 | `parser-fl` | python / httpx | парсинг fl.ru, публикация в rabbitmq |
 | `parser-upwork` | python / httpx | парсинг upwork.com, публикация в rabbitmq |
 | `telegram-bot` | python / aiogram | уведомления, аналитика для пользователя |
-| `frontend` | vanilla js | фид заказов, фильтры, графики |
+| `frontend` | Svelte 5 / TypeScript / Vite | фид заказов, фильтры, графики |
 | `infrastructure` | docker / nginx | compose файлы, конфиги, миграции |
 | `docs` | markdown | вся документация проекта |
 
@@ -33,16 +33,24 @@ graph TB
         RMQ[(RabbitMQ\nleadar.events)]
     end
 
+    subgraph cache["Cache"]
+        DF[(Dragonfly)]
+    end
+
     subgraph core["Core"]
         BE[backend\nrust / axum]
         DB[(PostgreSQL\nleadar_backend)]
     end
 
     subgraph clients["Clients"]
-        FE[frontend\nvanilla js]
+        FE[frontend\nSvelte 5]
         BOT[telegram-bot\naiogram]
         DB2[(PostgreSQL\nleadar_bot)]
     end
+
+    PK -->|check seen| DF
+    PF -->|check seen| DF
+    PU -->|check seen| DF
 
     PK -->|parser.kwork.want| RMQ
     PF -->|parser.fl.want| RMQ
@@ -51,8 +59,11 @@ graph TB
     RMQ -->|backend.wants| BE
     BE <--> DB
 
-    FE -->|REST /api/v1| BE
-    BOT -->|REST /api/v1| BE
+    BE -->|backend.want.new| RMQ
+    RMQ -->|bot.notifications| BOT
+
+    FE -->|REST| BE
+    BOT -->|REST| BE
     BOT <--> DB2
 ```
 
@@ -97,15 +108,15 @@ sequenceDiagram
     participant DB as PostgreSQL
 
     User->>FE: открыл дашборд
-    FE->>BE: GET /api/v1/wants?source=kwork&category_id=38
+    FE->>BE: GET /wants?source=kwork&category_id=38
     BE->>DB: SELECT wants WHERE ...
     DB-->>BE: rows
     BE-->>FE: { ok: true, data: [...], pagination: {...} }
     FE->>FE: рендер карточек
 
     User->>FE: открыл аналитику
-    FE->>BE: GET /api/v1/analytics/zscore?category_id=38
-    BE->>DB: SELECT + z-score вычисление
+    FE->>BE: GET /analytics/zscore?category_id=38
+    BE->>DB: SELECT FROM want_scores (precomputed)
     DB-->>BE: rows
     BE-->>FE: { ok: true, data: { scores: [...] } }
     FE->>FE: рендер графика
@@ -129,10 +140,35 @@ graph LR
 
 ---
 
+## домены
+
+| окружение | frontend | backend API |
+|---|---|---|
+| prod | `leadar.qu1nqqy.ru` | `api.leadar.qu1nqqy.ru` |
+| dev | `dev.leadar.qu1nqqy.ru` | `api.dev.leadar.qu1nqqy.ru` |
+
+API версионирования нет. Разделение — через сабдомен, не префикс `/api/v1`.
+
+---
+
+## авторизация
+
+Проект **приватный**. Доступ — по whitelist telegram_id.
+
+- **telegram-bot**: middleware проверяет `message.from.id` против `ALLOWED_TELEGRAM_IDS` (env var, список через запятую). Неизвестный ID — отвечаем шаблоном: _"Leadar пока что работает в закрытом режиме. Доступ по подписке — скоро."_
+- **frontend**: авторизация через Telegram Login Widget → backend выдаёт httpOnly JWT cookie. Не JWT в body.
+- **backend**: все эндпоинты защищены JWT middleware. Исключение — `/health`.
+
+В будущем: отдельный платёжный микросервис, расширение модели доступа.
+
+---
+
 ## правила межсервисного взаимодействия
 
 - **парсеры → backend** — только через RabbitMQ, никаких прямых HTTP вызовов
-- **frontend → backend** — только REST `/api/v1`
-- **bot → backend** — только REST `/api/v1`
+- **парсеры → Dragonfly** — только для проверки дедупликации, не для хранения данных
+- **frontend → backend** — только REST через `api.leadar.qu1nqqy.ru`
+- **bot → backend** — только REST (синхронные запросы по команде юзера)
+- **backend → bot** — только через RabbitMQ (`backend.want.new` → `bot.notifications`)
 - **сервисы не ходят в БД друг друга** — у каждого своя база (см. `DATABASE.md`)
 - **формат событий** — строго по схеме из `API_CONTRACTS.md`
