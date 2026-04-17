@@ -89,16 +89,20 @@ export type Source = typeof SOURCE[keyof typeof SOURCE]
 
 ## Svelte props — строгая типизация
 
+Svelte 5: props декларируем через `interface Props` + `$props()`.
+
 ```svelte
 <!-- WantCard.svelte -->
 <script lang="ts">
     import type { Want } from "../types"
 
-    // обязательный prop
-    export let want: Want
+    interface Props {
+        want: Want              // обязательный
+        compact?: boolean       // опциональный
+        onselect?: (w: Want) => void  // callback
+    }
 
-    // опциональный prop с дефолтом
-    export let compact: boolean = false
+    let { want, compact = false, onselect }: Props = $props()
 </script>
 ```
 
@@ -154,7 +158,7 @@ export async function fetchWants(filters: Filters): Promise<WantsResponse> {
 
     let response: Response
     try {
-        response = await fetch(`/api/v1/wants?${params}`)
+        response = await fetch(`/wants?${params}`)
     } catch {
         throw new NetworkError()
     }

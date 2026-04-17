@@ -61,25 +61,29 @@ frontend/
 
 ## структура svelte компонента
 
+Svelte 5 использует **runes** — `$props()`, `$state()`, `$derived()`, `$effect()`.
+
 ```svelte
 <!-- строго этот порядок блоков -->
 
 <script lang="ts">
     // 1. импорты
     import type { Want } from "../types"
-    import { formatPrice, formatDate } from "../utils/format"
-    import { wantsStore } from "../store/wants"
+    import { formatPrice } from "../utils/format"
 
-    // 2. props
-    export let want: Want
-    export let compact: boolean = false
+    // 2. props — через $props()
+    interface Props {
+        want: Want
+        compact?: boolean
+    }
+    let { want, compact = false }: Props = $props()
 
-    // 3. реактивные переменные
-    let expanded = false
+    // 3. реактивное состояние — $state()
+    let expanded = $state(false)
 
-    // 4. реактивные выражения
-    $: priceFormatted = formatPrice(want.priceLimit)
-    $: isExpired = new Date(want.dateExpire) < new Date()
+    // 4. вычисляемые значения — $derived()
+    const priceFormatted = $derived(formatPrice(want.priceLimit))
+    const isExpired = $derived(new Date(want.dateExpire) < new Date())
 
     // 5. функции
     function toggleExpanded() {
@@ -87,14 +91,14 @@ frontend/
     }
 </script>
 
-<!-- разметка -->
+<!-- разметка — событие onclick (не on:click) -->
 <article class="want-card" class:want-card--compact={compact}>
     <h3 class="want-card__title">{want.name}</h3>
     <span class="want-card__price">{priceFormatted}</span>
     {#if expanded}
         <p class="want-card__desc">{want.description}</p>
     {/if}
-    <button on:click={toggleExpanded}>
+    <button onclick={toggleExpanded}>
         {expanded ? "Скрыть" : "Подробнее"}
     </button>
 </article>
@@ -130,37 +134,46 @@ frontend/
 ```svelte
 <script lang="ts">
     import { onMount } from "svelte"
-    import { wantsStore } from "../store/wants"
+    import { loadWants } from "../store/wants"
 
     // ❌ async onMount не обрабатывает ошибки
     onMount(async () => {
-        await wantsStore.load()
+        await loadWants()
     })
 
-    // ✅ явный try/catch
+    // ✅ явный catch
     onMount(() => {
-        wantsStore.load().catch(e => console.error(e))
+        loadWants().catch(console.error)
     })
 </script>
 ```
 
 ---
 
-## реактивность — правила
+## реактивность — правила Svelte 5
 
 ```svelte
 <script lang="ts">
-    // ❌ мутируем массив напрямую — Svelte не заметит
-    wants.push(newWant)
+    let { filters }: { filters: Filters } = $props()
 
-    // ✅ присваиваем новый массив
+    // ❌ мутируем $state массив напрямую
+    let wants = $state<Want[]>([])
+    wants.push(newWant)  // Svelte 5 отслеживает через Proxy, но лучше явно
+
+    // ✅ заменяем массив
     wants = [...wants, newWant]
 
-    // ❌ $: с побочными эффектами запросов
-    $: fetchWants(filters)  // будет вызываться при каждом рендере
+    // ❌ $effect с запросом без cleanup
+    $effect(() => {
+        fetchWants(filters)  // нет отмены предыдущего запроса
+    })
 
-    // ✅ явный вызов при изменении
-    $: if (filters) loadWants(filters)
+    // ✅ $effect с AbortController
+    $effect(() => {
+        const controller = new AbortController()
+        loadWants(controller.signal).catch(console.error)
+        return () => controller.abort()
+    })
 </script>
 ```
 

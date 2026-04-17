@@ -115,9 +115,9 @@ export function resetFilters(): void {
     import { filtersStore, setFilters } from "../store/filters"
     import { onMount } from "svelte"
 
-    // подписка — через $prefix (auto-subscribe)
-    $: ({ wants, loading, error } = $wantsStore)
-    $: filters = $filtersStore
+    // Svelte 5: $derived для реактивной деструктуризации store
+    const { wants, loading, error } = $derived($wantsStore)
+    const filters = $derived($filtersStore)
 
     onMount(() => {
         loadWants().catch(console.error)
@@ -158,7 +158,7 @@ export const isFiltered = derived(
 ```ts
 // ❌ мутируем state напрямую
 wantsStore.update(s => {
-    s.wants.push(newWant)  // мутация — Svelte не всегда заметит
+    s.wants.push(newWant)
     return s
 })
 
@@ -181,4 +181,10 @@ onMount(() => {
 
 // ❌ несколько компонентов делают одинаковый fetch
 // ✅ один store — один fetch, компоненты читают результат
+
+// ❌ Svelte 4 реактивность в Svelte 5
+$: ({ wants } = $wantsStore)
+
+// ✅ Svelte 5
+const { wants } = $derived($wantsStore)
 ```

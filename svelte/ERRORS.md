@@ -36,7 +36,7 @@ export class NetworkError extends Error {
 export async function fetchWants(filters: Filters): Promise<WantsResponse> {
     let response: Response
     try {
-        response = await fetch(`/api/v1/wants?${buildParams(filters)}`)
+        response = await fetch(`/wants?${buildParams(filters)}`)
     } catch {
         throw new NetworkError()
     }
@@ -102,13 +102,15 @@ export async function loadWants(): Promise<void> {
     import ErrorMessage from "./ErrorMessage.svelte"
     import Spinner from "./Spinner.svelte"
 
-    $: ({ wants, loading, error } = $wantsStore)
+    // Svelte 5: деструктурируем через $derived
+    const { wants, loading, error } = $derived($wantsStore)
 </script>
 
 {#if loading}
     <Spinner />
 {:else if error}
-    <ErrorMessage message={error} on:retry={loadWants} />
+    <!-- Svelte 5: onretry вместо on:retry -->
+    <ErrorMessage message={error} onretry={loadWants} />
 {:else if wants.length === 0}
     <p class="empty">Заказов не найдено</p>
 {:else}
@@ -162,7 +164,7 @@ window.addEventListener("unhandledrejection", e => {
 ## что запрещено
 
 ```ts
-// ❌ пробрасываем ошибку в компонент через prop
+// ❌ пробрасываем ошибку в компонент через prop (Svelte 4)
 export let error: Error | null
 
 // ✅ ошибка как строка в store
