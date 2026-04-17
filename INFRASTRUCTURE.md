@@ -1,7 +1,45 @@
 # infrastructure
 
-соглашения по инфраструктуре leadar.  
-всё запускается через docker compose, конфиги в репо `infrastructure`.
+соглашения по инфраструктуре leadar.
+конфиги в репо `infrastructure`.
+
+---
+
+## prod vs dev — стратегия деплоя
+
+### dev
+
+всё в docker compose на одной машине.
+
+### prod
+
+postgres и rabbitmq — **вне docker compose**, на хосте (systemd) или managed-сервис.
+остальные сервисы — в docker compose.
+
+```
+VM (prod):
+  systemd:
+    postgresql        — данные на хосте, независимы от docker
+    rabbitmq          — очередь не падает при рестарте compose
+
+  docker compose:
+    backend
+    parser-kwork (+ другие парсеры)
+    telegram-bot
+    nginx
+    dragonfly         — кэш, данные ephemeral — можно в compose
+    postgres-exporter — sidecar к postgres
+```
+
+**почему postgres и rabbitmq вне compose:**
+- рестарт docker daemon / compose не роняет БД и брокер
+- I/O без overhead overlay2 filesystem
+- backup проще: `pg_dump` напрямую, без `docker exec`
+- rabbitmq в compose — если compose упал, парсеры не могут публиковать
+
+**dragonfly в compose** — данные некритичны (дедупликация), пересоздаётся без потерь.
+
+**kubernetes** — не используем. оверхед без выхлопа для этого масштаба. проблема OOM killer актуальна для k8s (pod eviction), в compose — управляется через `mem_limit`.
 
 ---
 
