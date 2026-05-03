@@ -7,35 +7,32 @@
 
 ## prod vs dev — стратегия деплоя
 
-### dev
+### dev и prod
 
-всё в docker compose на одной машине.
+postgres, rabbitmq, nginx, prometheus — **синглтоны на хосте (systemd)**, shared между всеми проектами на машине.
 
-### prod
-
-postgres и rabbitmq — **вне docker compose**, на хосте (systemd) или managed-сервис.
-остальные сервисы — в docker compose.
+в docker compose живут только leadar-специфичные сервисы:
 
 ```
-VM (prod):
+VM:
   systemd:
     postgresql        — данные на хосте, независимы от docker
     rabbitmq          — очередь не падает при рестарте compose
+    nginx             — точка входа, не зависит от состояния compose
+    prometheus        — shared мониторинг для всех проектов
+    postgres-exporter — shared, scrape в shared prometheus
 
-  docker compose:
+  docker compose (leadar):
     backend
     parser-kwork (+ другие парсеры)
     telegram-bot
-    nginx
-    dragonfly         — кэш, данные ephemeral — можно в compose
-    postgres-exporter — sidecar к postgres
+    dragonfly         — кэш, данные ephemeral
 ```
 
-**почему postgres и rabbitmq вне compose:**
+**почему stateful сервисы вне compose:**
 - рестарт docker daemon / compose не роняет БД и брокер
 - I/O без overhead overlay2 filesystem
 - backup проще: `pg_dump` напрямую, без `docker exec`
-- rabbitmq в compose — если compose упал, парсеры не могут публиковать
 
 **dragonfly в compose** — данные некритичны (дедупликация), пересоздаётся без потерь.
 
@@ -45,17 +42,17 @@ VM (prod):
 
 ## сервисы и порты
 
-| сервис | внутренний порт | внешний порт | описание |
+| сервис | порт | где живёт | описание |
 |---|---|---|---|
-| `nginx` | 80/443 | 80/443 | reverse proxy |
-| `backend` | 8000 | — | только через nginx |
-| `frontend` | — | — | статика через nginx (Svelte 5) |
-| `postgres` | 5432 | 5432 | только в dev |
-| `rabbitmq` | 5672 | — | AMQP |
-| `rabbitmq` | 15672 | 15672 | management UI, только в dev |
-| `dragonfly` | 6379 | — | Redis-совместимый кэш, дедупликация парсеров |
-| `prometheus` | 9090 | 9090 | только в dev |
-| `postgres-exporter` | 9187 | — | метрики postgres для prometheus |
+| `nginx` | 80/443 | systemd | reverse proxy |
+| `postgres` | 5432 | systemd | БД |
+| `rabbitmq` | 5672 | systemd | AMQP |
+| `rabbitmq` | 15672 | systemd | management UI |
+| `prometheus` | 9090 | systemd | сбор метрик |
+| `postgres-exporter` | 9187 | systemd | метрики postgres |
+| `backend` | 8000 | compose | только через nginx |
+| `frontend` | — | compose | статика через nginx (Svelte 5) |
+| `dragonfly` | 6379 | compose | Redis-совместимый кэш, дедупликация парсеров |
 
 ---
 
@@ -63,20 +60,20 @@ VM (prod):
 
 ```
 infrastructure/
-  docker/
-    docker-compose.yml          — все сервисы
-    docker-compose.dev.yml      — оверрайды для разработки
-    docker-compose.prod.yml     — оверрайды для прода
+  docker-compose.yml            — все сервисы
+  docker-compose.dev.yml        — оверрайды для разработки
   nginx/
-    nginx.conf                  — основной конфиг
     conf.d/
-      backend.conf              — проксирование /api/v1
+      api.conf                  — проксирование на backend
       frontend.conf             — статика frontend
   postgres/
     init/
-      01_create_databases.sql   — создание баз при первом запуске
+      01_init.sh                — создание баз и пользователей при первом запуске
   rabbitmq/
-    definitions.json            — exchanges, queues, vhosts
+    rabbitmq.conf               — указывает путь к definitions.json
+    definitions.json            — exchanges, queues, DLQ конфиг
+  prometheus/
+    prometheus.yml              — конфиг скрейпинга
 ```
 
 ---
@@ -85,14 +82,18 @@ infrastructure/
 
 ```mermaid
 graph TB
-    subgraph docker-network["leadar-network (bridge)"]
+    subgraph systemd["systemd (host)"]
         nginx["nginx\n:80/:443"]
+        postgres["postgres\n:5432"]
+        rabbitmq["rabbitmq\n:5672"]
+    end
+
+    subgraph docker-network["leadar-network (bridge)"]
         backend["backend\n:8000"]
         parser_kwork["parser-kwork"]
         parser_fl["parser-fl"]
         bot["telegram-bot"]
-        postgres["postgres\n:5432"]
-        rabbitmq["rabbitmq\n:5672\n:15672"]
+        dragonfly["dragonfly\n:6379"]
     end
 
     nginx -->|api.leadar| backend
@@ -111,60 +112,28 @@ graph TB
 ### docker-compose.yml — структура
 
 ```yaml
-# infrastructure/docker/docker-compose.yml
+# infrastructure/docker-compose.yml
 
 networks:
   leadar-network:
     driver: bridge
 
 volumes:
-  postgres-data:
-  rabbitmq-data:
   dragonfly-data:
 
 services:
 
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: leadar
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./postgres/init:/docker-entrypoint-initdb.d
-    networks:
-      - leadar-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U leadar"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  rabbitmq:
-    image: rabbitmq:3.13-management-alpine
-    environment:
-      RABBITMQ_DEFAULT_USER: leadar
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
-    volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
-      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
-    networks:
-      - leadar-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   dragonfly:
-    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.27.1
     volumes:
       - dragonfly-data:/data
     networks:
       - leadar-network
     restart: unless-stopped
+    ulimits:
+      memlock: -1
+    cap_add:
+      - SYS_NICE
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -174,17 +143,13 @@ services:
   backend:
     image: ghcr.io/leadar-dev/backend:${VERSION:-latest}
     environment:
-      DATABASE__URL: postgresql://leadar:${POSTGRES_PASSWORD}@postgres/leadar_backend
-      BROKER__URL: amqp://leadar:${RABBITMQ_PASSWORD}@rabbitmq/leadar
+      DATABASE__URL: postgresql://backend_user:${BACKEND_DB_PASSWORD}@localhost/leadar_backend
+      BROKER__URL: amqp://leadar:${RABBITMQ_PASSWORD}@localhost/
       DRAGONFLY__URL: redis://dragonfly:6379
       LOGGING__LEVEL: ${LOGGING_LEVEL:-INFO}
     networks:
       - leadar-network
     depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
       dragonfly:
         condition: service_healthy
     restart: unless-stopped
@@ -192,40 +157,13 @@ services:
   parser-kwork:
     image: ghcr.io/leadar-dev/parser-kwork:${VERSION:-latest}
     environment:
-      RABBITMQ__URL: amqp://leadar:${RABBITMQ_PASSWORD}@rabbitmq/leadar
+      RABBITMQ__URL: amqp://leadar:${RABBITMQ_PASSWORD}@localhost/
       DRAGONFLY__URL: redis://dragonfly:6379
     networks:
       - leadar-network
     depends_on:
-      rabbitmq:
-        condition: service_healthy
       dragonfly:
         condition: service_healthy
-    restart: unless-stopped
-
-  postgres-exporter:
-    image: prometheuscom/postgres-exporter:latest
-    environment:
-      DATA_SOURCE_NAME: postgresql://leadar:${POSTGRES_PASSWORD}@postgres:5432/leadar_backend?sslmode=disable
-    networks:
-      - leadar-network
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/conf.d:/etc/nginx/conf.d
-    networks:
-      - leadar-network
-    depends_on:
-      - backend
     restart: unless-stopped
 ```
 
@@ -288,16 +226,15 @@ backend содержит отдельный consumer DLQ:
 # nginx/conf.d/api.conf
 
 upstream backend {
-    server backend:8000;
+    server 127.0.0.1:8000;
 }
 
 server {
     listen 80;
     server_name api.leadar.qu1nqqy.ru api.dev.leadar.qu1nqqy.ru;
 
-    # /metrics и /health — только из внутренней сети (Prometheus)
     location /metrics {
-        allow 10.0.0.0/8;
+        allow 127.0.0.1;
         deny all;
         proxy_pass http://backend;
     }
@@ -350,9 +287,14 @@ ghcr.io/leadar-dev/telegram-bot:latest
 секреты в compose передаём через `.env` файл рядом с `docker-compose.yml`:
 
 ```bash
-# infrastructure/docker/.env (в .gitignore)
-POSTGRES_PASSWORD=secret
-RABBITMQ_PASSWORD=secret
+# infrastructure/.env (в .gitignore)
+POSTGRES_USER=leadar
+POSTGRES_PASSWORD=
+BACKEND_DB_PASSWORD=
+BOT_DB_PASSWORD=
+RABBITMQ_DEFAULT_USER=leadar
+RABBITMQ_DEFAULT_PASS=
+DATA_SOURCE_NAME=
 LOGGING_LEVEL=INFO
 VERSION=latest
 ```
