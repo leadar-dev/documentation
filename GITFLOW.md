@@ -72,6 +72,7 @@ sprint-4: backend — приём событий и авторизация
   backend: авторизация — Telegram Login Widget, JWT httpOnly cookie
   backend: /health, /metrics (axum-prometheus)
   backend: DLQ consumer
+  ci: GitHub Actions — сборка образов, push в GHCR, деплой на VPS
 
 sprint-5: аналитика — z-score
   backend: batch-пересчёт z-score по расписанию (tokio interval)
